@@ -1,0 +1,2 @@
+{"api_xxxx": "http://api-xxx.com:8080/__health.json",
+"http_xxxx": "http://http-xxx.com:8080/__health.json"}
