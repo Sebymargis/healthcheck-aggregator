@@ -15,10 +15,10 @@ health = {}
 with open('health_links.txt', 'r') as inf:
     health = eval(inf.read())
 
-dictionary = {'schemaVersion':1, 'name':'Data Platform PROD', 'description':'Testing', 'checks': []}
-dictionary_hui = {'schemaVersion':1, 'name':'Data Platform PROD', 'description':'This is HUI', 'checks': []}
-dictionary_spoor = {'schemaVersion':1, 'name':'Data Platform PROD', 'description':'This is Spoor', 'checks': []}
-dictionary_etl = {'schemaVersion':1, 'name':'Data Platform PROD', 'description':'This is ETL', 'checks': []}
+dictionary = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'Testing', 'checks': []}
+dictionary_hui = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is HUI', 'checks': []}
+dictionary_spoor = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is Spoor', 'checks': []}
+dictionary_etl = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is ETL', 'checks': []}
 
 
 
@@ -120,6 +120,12 @@ class WebApp(tornado.web.Application):
         # print('HUI is {}'.format(dictionary_hui))
         # print('Spoor is {}'.format(dictionary_spoor))
 
+        dictionary_etl['checks'] = sorted(dictionary_etl['checks'], key=lambda k: k['name'])
+        dictionary['checks'] = sorted(dictionary['checks'], key=lambda k: k['name'])
+        dictionary_hui['checks'] = sorted(dictionary_hui['checks'], key=lambda k: k['name'])
+        dictionary_spoor['checks'] = sorted(dictionary_spoor['checks'], key=lambda k: k['name'])
+
+
 
 class Index(tornado.web.RequestHandler):
     @tornado.web.asynchronous
@@ -140,7 +146,7 @@ class HealthCheckAll(tornado.web.RequestHandler):
 class HealthCheckETL(tornado.web.RequestHandler):
     def get(self):
         self.set_header("Content-Type", "application/json")
-        self.write(json.dumps(dictionary))
+        self.write(json.dumps(dictionary_etl))
 
 
 class HealthCheckHUI(tornado.web.RequestHandler):
@@ -153,6 +159,7 @@ class HealthCheckSpoor(tornado.web.RequestHandler):
     def get(self):
         self.set_header("Content-Type", "application/json")
         self.write(json.dumps(dictionary_spoor))
+
 
 if __name__ == "__main__":
     http_server = tornado.httpserver.HTTPServer(WebApp())
