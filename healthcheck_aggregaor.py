@@ -5,8 +5,12 @@ import tornado.ioloop
 import tornado.web
 import tornado.websocket
 import settings
+from datetime import datetime
+from datetime import timedelta
 import collections
 import os
+import boto3
+from botocore.exceptions import ClientError
 from settings import logging
 
 logger = logging.getLogger(__name__)
@@ -19,11 +23,18 @@ dictionary = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': '
 dictionary_hui = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is HUI', 'checks': []}
 dictionary_spoor = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is Spoor', 'checks': []}
 dictionary_etl = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is ETL', 'checks': []}
+reshift_clusters = ['analytics']
+
+session = boto3.Session(profile_name='cloudwatch-prod', region_name='eu-west-1')
+cloudwatch = session.client('cloudwatch')
+
+if cloudwatch is None:
+            print("I could not connect to AWS with the specified credentials")  # Tell me if you can't connect
 
 
 
 class WebApp(tornado.web.Application):
-    background_loop = 60000
+    background_loop = 30000
 
     def __init__(self):
         handlers = [(r'/', Index),
@@ -50,7 +61,7 @@ class WebApp(tornado.web.Application):
                 app_dict = {'ok': '', 'checkOutput': '', 'panicGuide': '', 'severity': '3', 'businessImpact': '',
                             'technicalSummary': 'For individual checks: {}'.format(v), 'name': '', 'lastUpdated': ''}
 
-                response = requests.get(v)
+                response = requests.get(v, timeout=20)
                 data = response.json()
                 x = len(data['checks'])  # how many checks we have
                 i = 0
@@ -68,8 +79,8 @@ class WebApp(tornado.web.Application):
                     app_dict['severity'] = data['checks'][i]['severity']
                     i += 1
 
-                #print('--------------------')
-                #print(temp_status)
+                # print('--------------------')
+                # print(temp_status)
                 severity = 3
                 for index, status in enumerate(temp_status):
                     if status is True:
@@ -80,6 +91,7 @@ class WebApp(tornado.web.Application):
                         app_dict['ok'] = False
                         if app_dict['severity'] < severity:
                             app_dict['severity'] = severity
+                        break
 
                 least_recent = temp_updated[0]
                 for item in temp_updated:
@@ -98,7 +110,7 @@ class WebApp(tornado.web.Application):
                     dictionary_hui['checks'].append(app_dict)
                 elif 'spoor' in k.lower():
                     dictionary_spoor['checks'].append(app_dict)
-                elif 'ingester' or 'validator' or 'transformer' in k.lower():
+                elif 'ingester' or 'validator' or 'transformer' or 'dq' in k.lower():
                     dictionary_etl['checks'].append(app_dict)
 
             except (requests.ConnectionError, requests.Timeout) as err:
@@ -116,6 +128,48 @@ class WebApp(tornado.web.Application):
                 err_dict['name'] = k
                 dictionary['checks'].append(err_dict)
 
+        cluster_status = {'ok': '', 'checkOutput': '', 'panicGuide': '',
+                          'severity': '1', 'businessImpact': '',
+                          'technicalSummary': 'Please check AWS cluster', 'name': '', 'lastUpdated': ''}
+
+        for cluster in reshift_clusters:
+            try:
+                response = cloudwatch.get_metric_statistics(
+                    Namespace='AWS/Redshift',
+                    MetricName='HealthStatus',
+                    Dimensions=[
+                        {
+                            'Name': 'ClusterIdentifier',
+                            'Value': cluster
+                        },
+                    ],
+                    StartTime=datetime.utcnow() - timedelta(minutes=2),
+                    EndTime=datetime.utcnow() - timedelta(minutes=1),
+                    Period=60,
+                    Statistics=['Minimum']
+                )
+
+                for resp in response['Datapoints']:
+                    if (int(resp['Minimum'])) == 1:
+                        cluster_status['ok'] = True
+                        cluster_status['checkOutput'] = "Cluster is healthy"
+                    else:
+                        cluster_status['ok'] = False
+                        cluster_status['checkOutput'] = "!! Cluster is UNHEALTHY !!"
+                cluster_status['lastUpdated'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                cluster_status['name'] = "Redshift: {} cluster ".format(cluster.upper())
+                cluster_status['businessImpact'] = "N/A"
+                cluster_status['panicGuide'] = "If cluster down for long period of time raise ticket with AWS"
+                dictionary_etl['checks'].append(cluster_status)
+                dictionary['checks'].append(cluster_status)
+
+                print("{} for cluster {} the result is {}".format(datetime.utcnow(), cluster, cluster_status['ok']))
+                logging.info(cluster_status)
+
+            except ClientError as error:
+                logging.warning('Boto API error: %s', error)
+                print('boooooo')
+
         # print('ETL is {}'.format(dictionary_etl))
         # print('HUI is {}'.format(dictionary_hui))
         # print('Spoor is {}'.format(dictionary_spoor))
@@ -124,7 +178,6 @@ class WebApp(tornado.web.Application):
         dictionary['checks'] = sorted(dictionary['checks'], key=lambda k: k['name'])
         dictionary_hui['checks'] = sorted(dictionary_hui['checks'], key=lambda k: k['name'])
         dictionary_spoor['checks'] = sorted(dictionary_spoor['checks'], key=lambda k: k['name'])
-
 
 
 class Index(tornado.web.RequestHandler):
