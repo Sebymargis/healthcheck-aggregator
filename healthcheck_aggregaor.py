@@ -7,7 +7,6 @@ import tornado.websocket
 import settings
 from datetime import datetime
 from datetime import timedelta
-import collections
 import os
 import boto3
 from botocore.exceptions import ClientError
@@ -15,7 +14,6 @@ from settings import logging
 
 logger = logging.getLogger(__name__)
 
-health = {}
 with open('health_links.txt', 'r') as inf:
     health = eval(inf.read())
 
@@ -23,14 +21,13 @@ dictionary = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': '
 dictionary_hui = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is HUI', 'checks': []}
 dictionary_spoor = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is Spoor', 'checks': []}
 dictionary_etl = {'schemaVersion': 1, 'name': 'Data Platform PROD', 'description': 'This is ETL', 'checks': []}
-reshift_clusters = ['analytics']
+redshift_clusters = ['analytics', 'ft-dw-prod']
 
 session = boto3.Session(profile_name='cloudwatch-prod', region_name='eu-west-1')
 cloudwatch = session.client('cloudwatch')
 
 if cloudwatch is None:
             print("I could not connect to AWS with the specified credentials")  # Tell me if you can't connect
-
 
 
 class WebApp(tornado.web.Application):
@@ -128,12 +125,11 @@ class WebApp(tornado.web.Application):
                 err_dict['name'] = k
                 dictionary['checks'].append(err_dict)
 
-        cluster_status = {'ok': '', 'checkOutput': '', 'panicGuide': '',
-                          'severity': '1', 'businessImpact': '',
-                          'technicalSummary': 'Please check AWS cluster', 'name': '', 'lastUpdated': ''}
-
-        for cluster in reshift_clusters:
+        for cluster in redshift_clusters:
             try:
+                cluster_status = {'ok': '', 'checkOutput': '', 'panicGuide': '',
+                                  'severity': '1', 'businessImpact': '',
+                                  'technicalSummary': 'Please check Redshift cluster', 'name': '', 'lastUpdated': ''}
                 response = cloudwatch.get_metric_statistics(
                     Namespace='AWS/Redshift',
                     MetricName='HealthStatus',
@@ -156,19 +152,18 @@ class WebApp(tornado.web.Application):
                     else:
                         cluster_status['ok'] = False
                         cluster_status['checkOutput'] = "!! Cluster is UNHEALTHY !!"
-                cluster_status['lastUpdated'] = datetime.now().strftime("%Y-%m-%d %H:%M")
                 cluster_status['name'] = "Redshift: {} cluster ".format(cluster.upper())
+                cluster_status['lastUpdated'] = datetime.now().strftime("%Y-%m-%d %H:%M")
                 cluster_status['businessImpact'] = "N/A"
-                cluster_status['panicGuide'] = "If cluster down for long period of time raise ticket with AWS"
+                cluster_status['panicGuide'] = "If cluster is down for long period of time raise ticket with AWS"
                 dictionary_etl['checks'].append(cluster_status)
                 dictionary['checks'].append(cluster_status)
 
-                print("{} for cluster {} the result is {}".format(datetime.utcnow(), cluster, cluster_status['ok']))
+                # print("{} for cluster {} the result is {}".format(datetime.utcnow(), cluster, cluster_status['ok']))
                 logging.info(cluster_status)
 
             except ClientError as error:
                 logging.warning('Boto API error: %s', error)
-                print('boooooo')
 
         # print('ETL is {}'.format(dictionary_etl))
         # print('HUI is {}'.format(dictionary_hui))
@@ -218,4 +213,3 @@ if __name__ == "__main__":
     http_server = tornado.httpserver.HTTPServer(WebApp())
     http_server.listen(8888)
     tornado.ioloop.IOLoop.instance().start()
-
